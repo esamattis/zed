@@ -12,10 +12,10 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
+        time::Instant,
 };
-use task::Shell;
-use util::get_default_system_shell_preferring_bash;
+
+use crate::preferred_terminal_shell;
 
 pub struct Terminal {
     id: acp::TerminalId,
@@ -224,15 +224,9 @@ pub async fn create_terminal_entity(
     env.insert("GIT_PAGER".into(), "cat".into());
     env.extend(env_vars);
 
-    // Use remote shell or default system shell, as appropriate
-    let shell = project
-        .update(cx, |project, cx| {
-            project
-                .remote_client()
-                .and_then(|r| r.read(cx).default_system_shell())
-                .map(Shell::Program)
-        })
-        .unwrap_or_else(|| Shell::Program(get_default_system_shell_preferring_bash()));
+    let shell = project.update(cx, |project, cx| {
+        preferred_terminal_shell(project.remote_client().and_then(|r| r.read(cx).shell()))
+    });
     let is_windows = project.read_with(cx, |project, cx| project.path_style(cx).is_windows());
     let (task_command, task_args) = task::ShellBuilder::new(&shell, is_windows)
         .redirect_stdin_to_dev_null()

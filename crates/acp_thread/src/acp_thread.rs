@@ -43,6 +43,12 @@ use util::path_list::PathList;
 use util::{ResultExt, get_default_system_shell_preferring_bash, paths::PathStyle};
 use uuid::Uuid;
 
+pub(crate) fn preferred_terminal_shell(remote_shell: Option<String>) -> Shell {
+    remote_shell
+        .map(Shell::Program)
+        .unwrap_or_else(|| Shell::Program(get_default_system_shell_preferring_bash()))
+}
+
 /// Returned when the model stops because it exhausted its output token budget.
 #[derive(Debug)]
 pub struct MaxOutputTokensError;
@@ -2984,15 +2990,13 @@ impl AcpThread {
             let terminal_id = terminal_id.clone();
             async move |_this, cx| {
                 let env = env.await;
-                let shell = project
-                    .update(cx, |project, cx| {
-                        project
-                            .remote_client()
-                            .and_then(|r| r.read(cx).default_system_shell())
-                    })
-                    .unwrap_or_else(|| get_default_system_shell_preferring_bash());
+                let shell = project.update(cx, |project, cx| {
+                    preferred_terminal_shell(
+                        project.remote_client().and_then(|r| r.read(cx).shell()),
+                    )
+                });
                 let (task_command, task_args) =
-                    ShellBuilder::new(&Shell::Program(shell), is_windows)
+                    ShellBuilder::new(&shell, is_windows)
                         .redirect_stdin_to_dev_null()
                         .build(Some(command.clone()), &args);
                 let terminal = project
@@ -3266,6 +3270,22 @@ mod tests {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
         });
+    }
+
+    #[test]
+    fn preferred_terminal_shell_uses_remote_shell_when_available() {
+        assert_eq!(
+            preferred_terminal_shell(Some("/bin/zsh".to_string())),
+            Shell::Program("/bin/zsh".to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_terminal_shell_falls_back_locally() {
+        assert_eq!(
+            preferred_terminal_shell(None),
+            Shell::Program(get_default_system_shell_preferring_bash())
+        );
     }
 
     #[gpui::test]
